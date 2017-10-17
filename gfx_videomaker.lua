@@ -59,6 +59,7 @@ local maxFrame = 2000
 -- /Timeline Vars
 -----------------------
 
+local gameID
 
 -----------------------
 -- Control Vars
@@ -106,10 +107,10 @@ local function InterpRotation(ratio, ratio2, rot1, rot2)
 	if larger - smaller > math.pi then
 		local pi2 = 2 * math.pi
 		local res = (rot1 + pi2) * ratio + (rot2 + pi2) * ratio2
-		while ret > math.pi do
-			ret = res - pi2
+		while res > math.pi do
+			res = res - pi2
 		end
-		return ret
+		return res
 	end
 	return rot1 * ratio + rot2 * ratio2
 end
@@ -128,7 +129,15 @@ local function GetInterpolatedCameraState(ratio, state1, state2)
 	interpState.dx  = InterpRotation(ratio2, ratio, state1.dx, state2.dx)
 	interpState.dy  = InterpRotation(ratio2, ratio, state1.dy, state2.dy)
 	interpState.dz  = InterpRotation(ratio2, ratio, state1.dz, state2.dz)
+	
+	interpState.rx  = InterpRotation(ratio2, ratio, state1.rx, state2.rx)
+	interpState.ry  = InterpRotation(ratio2, ratio, state1.ry, state2.ry)
+	interpState.rz  = InterpRotation(ratio2, ratio, state1.rz, state2.rz)
 	return interpState
+end
+
+local function GetFilename()
+	return (Game.gameID or "game1") .. ".lua"
 end
 
 -----------------------
@@ -376,6 +385,54 @@ local function InitGUI()
 			end
 		}
 	}
+	
+	saveButton = Chili.Button:New{
+		y = 70,
+		x = 0,
+		width = 100,
+		caption = "Save Shots",
+		OnClick = {
+			function(self)
+				WG.SaveTable(shots, "cache/", GetFilename(), "", {endOfFile = true, prefixReturn = true})
+			end
+		}
+	}
+	
+	loadButton = Chili.Button:New{
+		y = 70,
+		x = 110,
+		width = 100,
+		caption = "Load Shots",
+		OnClick = {
+			function(self)
+				shots = VFS.Include("cache/" .. GetFilename())
+				numShots = #shots
+				nodeToShot = {}
+				shotSortedKeyFrames = {}
+				nodeToKeyFrame = {}
+				shotsTree.root:ClearChildren()
+				
+				-- create shot nodes
+				for i=1,#shots do
+					local newNode = shotsTree.root:Add("Shot " .. i)
+					newNode = UnlinkSafe(newNode)
+					nodeToShot[newNode] = i
+					RegenerateSortedKeyFrames(i)
+					
+					-- create frame nodes
+					for _, frame in pairs(shotSortedKeyFrames[i]) do
+						local subnode = newNode:Add(FrameToTime(frame))
+						subnode = UnlinkSafe(subnode)
+						nodeToKeyFrame[subnode] = frame
+					end
+					
+					if i==1 then
+						shotsTree:Select(newNode)
+					end
+				end
+			end
+		}
+	}
 
 	shotsTree = Chili.TreeView:New{
 		y = 0,
@@ -389,7 +446,7 @@ local function InitGUI()
 
 	shotsScroll = Chili.ScrollPanel:New{
 		x = 0,
-		y = 70,
+		y = 90,
 		right = 0,
 		bottom = 0,
 		children = {
@@ -413,6 +470,8 @@ local function InitGUI()
 			deleteButton,
 			playButton,
 			recordButton,
+			saveButton,
+			loadButton,
 			shotsScroll,
 		},
 	}
@@ -555,7 +614,7 @@ local function InitGUI()
 		y = "90%",
 		right = 10,
 		width  = "50%",
-		height = 100,
+		height = 120,
 		parent = Chili.Screen0,
 		children = {
 			prevSecButton,
@@ -632,6 +691,10 @@ end
 function widget:Initialize()
 	InitGUI()
 	ChangeTimelineFrame(0)
+end
+
+function widget:GameID(gid)
+	gameID = gid
 end
 
 -----------------------
