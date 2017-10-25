@@ -34,6 +34,8 @@ local shotsTree
 local shotsScroll
 local loadButton
 local saveButton
+local playReplayButton
+local recordReplayButton
 
 -----------------------
 -- Timeline window
@@ -80,6 +82,7 @@ local recording = false
 local vsx, vsy
 
 local recordQueue = {}
+local isReplay = Spring.IsReplay()
 
 -----------------------
 -- /Util funcs
@@ -289,7 +292,23 @@ local function DeleteNode()
 end
 
 
-local function PlayShot(record)
+local function QueueShot(shotNum, offset, record)
+	local numKeyFrames = #shotSortedKeyFrames[shotNum]
+	if numKeyFrames < 2 then
+		Spring.Echo("A shot must have a start and an end")
+		return
+	end
+	for kf = shotSortedKeyFrames[shotNum][1],shotSortedKeyFrames[shotNum][numKeyFrames] do
+		local frame = offset + kf - shotSortedKeyFrames[shotNum][1]
+		-- shouldn't happen, but for safety
+		if not recordQueue[frame] then
+			recordQueue[frame] = {}
+		end
+		table.insert(recordQueue[frame], {shotNum, kf, record})
+	end
+end
+
+local function QueueCurrentShot(offset, record)
 	local node = GetSelectedNode()
 	if not node then
 		return
@@ -298,23 +317,16 @@ local function PlayShot(record)
 	if keyFrame then
 		node = UnlinkSafe(node.parent)
 	end
-	local shot = nodeToShot[node]
-	if not shot then
+	local shotNum = nodeToShot[node]
+	if not shotNum then
 		return
 	end
-	local numKeyFrames = #shotSortedKeyFrames[shot]
-	if numKeyFrames < 2 then
-		Spring.Echo("A shot must have a start and an end")
-		return
-	end
-	local offset = Spring.GetGameFrame() + 1
-	for kf = shotSortedKeyFrames[shot][1],shotSortedKeyFrames[shot][numKeyFrames] do
-		local frame = offset + kf - shotSortedKeyFrames[shot][1]
-		-- shouldn't happen, but for safety
-		if not recordQueue[frame] then
-			recordQueue[frame] = {}
-		end
-		table.insert(recordQueue[frame], {shot, kf, record})
+	QueueShot(shotNum, offset, record)
+end
+
+local function QueueAllShots(offset, record)
+	for i, _ in pairs(shots) do
+		QueueShot(i, offset, record)
 	end
 end
 
@@ -325,15 +337,63 @@ end
 
 
 -----------------------
+-- Serialization Funcs
+-----------------------
+
+local function SaveShots()
+	local t = {
+		numShots = numShots,
+		shots = shots,
+		shotSortedKeyFrames = shotSortedKeyFrames
+	}
+	table.save(t, SAVED_SHOTS_DIR .. "/" .. GetFilename())
+end
+
+local function LoadShots()
+	local t = VFS.Include(SAVED_SHOTS_DIR .. "/" .. GetFilename())
+	shots = t.shots
+	shotSortedKeyFrames = t.shotSortedKeyFrames
+	numShots = t.numShots
+
+	nodeToShot = {}
+	nodeToKeyFrame = {}
+	shotsTree.root:ClearChildren()
+
+	-- create shot nodes
+	for i, _ in pairs(shots) do
+		local newNode = shotsTree.root:Add("Shot " .. i)
+		newNode = UnlinkSafe(newNode)
+		nodeToShot[newNode] = i
+		RegenerateSortedKeyFrames(i)
+
+		-- create frame nodes
+		for _, frame in pairs(shotSortedKeyFrames[i]) do
+			local subnode = newNode:Add(FrameToTime(frame))
+			subnode = UnlinkSafe(subnode)
+			nodeToKeyFrame[subnode] = frame
+		end
+
+		if i == 1 then
+			shotsTree:Select(newNode)
+		end
+	end
+end
+-----------------------
+-- /Serialization Funcs
+-----------------------
+
+
+-----------------------
 -- Callins && Crap
 -----------------------
 
 local function InitGUI()
 	local Chili = WG.Chili
+	local currentY = 10
 
 	keyFrameButton = Chili.Button:New{
+		y = currentY,
 		x = 0,
-		y = 10,
 		width = 100,
 		caption = "Set KeyFrame",
 		OnClick = {
@@ -344,7 +404,7 @@ local function InitGUI()
 	}
 
 	loadFrameButton = Chili.Button:New{
-		y = 10,
+		y = currentY,
 		x = 110,
 		width = 100,
 		caption = "Get Frame",
@@ -354,9 +414,10 @@ local function InitGUI()
 			end
 		}
 	}
+	currentY = currentY + 20
 
 	newShotButton = Chili.Button:New{
-		y = 30,
+		y = currentY,
 		x = 0,
 		width = 100,
 		caption = "New Shot",
@@ -368,7 +429,7 @@ local function InitGUI()
 	}
 
 	deleteButton = Chili.Button:New{
-		y = 30,
+		y = currentY,
 		x = 110,
 		width = 100,
 		caption = "Delete",
@@ -378,85 +439,65 @@ local function InitGUI()
 			end
 		}
 	}
+	currentY = currentY + 20
 
 	playButton = Chili.Button:New{
-		y = 50,
+		y = currentY,
 		x = 0,
 		width = 100,
 		caption = "Play Shot",
 		OnClick = {
 			function(self)
-				PlayShot(false)
+				QueueCurrentShot(Spring.GetGameFrame() + 1, false)
 			end
 		}
 	}
 
 	recordButton = Chili.Button:New{
-		y = 50,
+		y = currentY,
 		x = 110,
 		width = 100,
 		caption = "Record Shot",
 		OnClick = {
 			function(self)
-				PlayShot(true)
+				QueueCurrentShot(Spring.GetGameFrame() + 1, true)
 			end
 		}
 	}
+	currentY = currentY + 20
 
-	saveButton = Chili.Button:New{
-		y = 70,
+	playReplayButton = Chili.Button:New{
+		y = currentY,
 		x = 0,
 		width = 100,
-		caption = "Save Shots",
+		caption = "Play Replay",
 		OnClick = {
 			function(self)
-				local t = {
-					numShots = numShots,
-					shots = shots,
-					shotSortedKeyFrames = shotSortedKeyFrames
-				}
-				table.save(t, SAVED_SHOTS_DIR .. "/" .. GetFilename())
+				if not isReplay then
+					Spring.Echo("Not playing a replay!")
+					return
+				end
+				QueueAllShots(0, false)
 			end
 		}
 	}
 
-	loadButton = Chili.Button:New{
-		y = 70,
+	recordReplayButton = Chili.Button:New{
+		y = currentY,
 		x = 110,
 		width = 100,
-		caption = "Load Shots",
+		caption = "Record Replay",
 		OnClick = {
 			function(self)
-				local t = VFS.Include(SAVED_SHOTS_DIR .. "/" .. GetFilename())
-				shots = t.shots
-				shotSortedKeyFrames = t.shotSortedKeyFrames
-				numShots = t.numShots
-
-				nodeToShot = {}
-				nodeToKeyFrame = {}
-				shotsTree.root:ClearChildren()
-
-				-- create shot nodes
-				for i, _ in pairs(shots) do
-					local newNode = shotsTree.root:Add("Shot " .. i)
-					newNode = UnlinkSafe(newNode)
-					nodeToShot[newNode] = i
-					RegenerateSortedKeyFrames(i)
-
-					-- create frame nodes
-					for _, frame in pairs(shotSortedKeyFrames[i]) do
-						local subnode = newNode:Add(FrameToTime(frame))
-						subnode = UnlinkSafe(subnode)
-						nodeToKeyFrame[subnode] = frame
-					end
-
-					if i==1 then
-						shotsTree:Select(newNode)
-					end
+				if not isReplay then
+					Spring.Echo("Not playing a replay!")
+					return
 				end
+				QueueAllShots(0, true)
 			end
 		}
 	}
+	currentY = currentY + 20
 
 	shotsTree = Chili.TreeView:New{
 		y = 0,
@@ -469,13 +510,37 @@ local function InitGUI()
 	}
 
 	shotsScroll = Chili.ScrollPanel:New{
+		y = currentY,
 		x = 0,
-		y = 90,
 		right = 0,
-		bottom = 0,
+		bottom = 20,
 		children = {
 			shotsTree
 		},
+	}
+
+	saveButton = Chili.Button:New{
+		bottom = 0,
+		x = 0,
+		width = 100,
+		caption = "Save Shots",
+		OnClick = {
+			function(self)
+				SaveShots()
+			end
+		}
+	}
+
+	loadButton = Chili.Button:New{
+		bottom = 0,
+		x = 110,
+		width = 100,
+		caption = "Load Shots",
+		OnClick = {
+			function(self)
+				LoadShots()
+			end
+		}
 	}
 
 	controlWindow = Chili.Window:New{
@@ -494,9 +559,11 @@ local function InitGUI()
 			deleteButton,
 			playButton,
 			recordButton,
-			saveButton,
-			loadButton,
+			playReplayButton,
+			recordReplayButton,
 			shotsScroll,
+			saveButton,
+			loadButton
 		},
 	}
 
@@ -705,6 +772,9 @@ end
 
 function widget:GameFrame()
 	gameFrame = Spring.GetGameFrame()
+	if isReplay then
+		ChangeTimelineFrame(gameFrame)
+	end
 	recordQueue[gameFrame - 1] = nil
 	if not recordQueue[gameFrame] then
 		return
@@ -727,7 +797,9 @@ function widget:DrawScreenEffects()
 	if RecordFrame() then
 		if PopFromQueue() then
 			SetupCamera()
-			ChangeTimelineFrame(playedFrame)
+			if not isReplay then
+				ChangeTimelineFrame(playedFrame)
+			end
 		else
 			Spring.SetVideoCapturingMode(false)
 			Spring.SendCommands("hideinterface 0")
