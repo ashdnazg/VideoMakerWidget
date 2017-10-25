@@ -32,6 +32,8 @@ local recordButton
 local controlWindow
 local shotsTree
 local shotsScroll
+local loadButton
+local saveButton
 
 -----------------------
 -- Timeline window
@@ -65,7 +67,6 @@ local gameID
 -- Control Vars
 -----------------------
 
-local savedCam
 local numShots = 0
 local nodeToShot = {}
 local nodeToKeyFrame = {}
@@ -103,15 +104,12 @@ local function FrameToTime(f)
 end
 
 local function InterpRotation(ratio, ratio2, rot1, rot2)
-	local larger = math.max(rot1, rot2)
-	local smaller = math.min(rot1, rot2)
-	if larger - smaller > math.pi then
-		local pi2 = 2 * math.pi
-		local res = (rot1 + pi2) * ratio + (rot2 + pi2) * ratio2
-		while res > math.pi do
-			res = res - pi2
+	if math.max(rot1, rot2) - math.min(rot1, rot2) > math.pi then
+		if rot1 > rot2 then
+			rot2 = rot2 + 2 * math.pi
+		else
+			rot1 = rot1 + 2 * math.pi
 		end
-		return res
 	end
 	return rot1 * ratio + rot2 * ratio2
 end
@@ -400,7 +398,12 @@ local function InitGUI()
 		caption = "Save Shots",
 		OnClick = {
 			function(self)
-				table.save(shots, "cache/" .. GetFilename())
+				local t = {
+					numShots = numShots,
+					shots = shots,
+					shotSortedKeyFrames = shotSortedKeyFrames
+				}
+				table.save(t, "cache/" .. GetFilename())
 			end
 		}
 	}
@@ -412,9 +415,12 @@ local function InitGUI()
 		caption = "Load Shots",
 		OnClick = {
 			function(self)
-				shots = VFS.Include("cache/" .. GetFilename())
+				local t = VFS.Include("cache/" .. GetFilename())
+				shots = t.shots
+				shotSortedKeyFrames = t.shotSortedKeyFrames
+				numShots = t.numShots
+
 				nodeToShot = {}
-				shotSortedKeyFrames = {}
 				nodeToKeyFrame = {}
 				shotsTree.root:ClearChildren()
 
@@ -644,7 +650,7 @@ local vsx, vsy
 function widget:GameFrame(n)
 	if saveImage then
 		if record then
-			gl.SaveImage(0,0,vsx,vsy,string.format("capture_%06d.png", saveImage));
+			gl.SaveImage(0,0,vsx,vsy,string.format("captures/capture_%06d.png", saveImage));
 		end
 		saveImage = false
 		if not playedShot or not playedFrame then
