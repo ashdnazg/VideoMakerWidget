@@ -129,10 +129,11 @@ local function GetInterpolatedCameraState(ratio, state1, state2)
 	interpState.dx  = InterpRotation(ratio2, ratio, state1.dx, state2.dx)
 	interpState.dy  = InterpRotation(ratio2, ratio, state1.dy, state2.dy)
 	interpState.dz  = InterpRotation(ratio2, ratio, state1.dz, state2.dz)
-	
-	interpState.rx  = InterpRotation(ratio2, ratio, state1.rx, state2.rx)
-	interpState.ry  = InterpRotation(ratio2, ratio, state1.ry, state2.ry)
-	interpState.rz  = InterpRotation(ratio2, ratio, state1.rz, state2.rz)
+
+	interpState.dx  = InterpRotation(ratio2, ratio, state1.dx, state2.dx)
+	interpState.dy  = InterpRotation(ratio2, ratio, state1.dy, state2.dy)
+	interpState.dz  = InterpRotation(ratio2, ratio, state1.dz, state2.dz)
+
 	return interpState
 end
 
@@ -385,7 +386,7 @@ local function InitGUI()
 			end
 		}
 	}
-	
+
 	saveButton = Chili.Button:New{
 		y = 70,
 		x = 0,
@@ -397,7 +398,7 @@ local function InitGUI()
 			end
 		}
 	}
-	
+
 	loadButton = Chili.Button:New{
 		y = 70,
 		x = 110,
@@ -411,21 +412,21 @@ local function InitGUI()
 				shotSortedKeyFrames = {}
 				nodeToKeyFrame = {}
 				shotsTree.root:ClearChildren()
-				
+
 				-- create shot nodes
 				for i=1,#shots do
 					local newNode = shotsTree.root:Add("Shot " .. i)
 					newNode = UnlinkSafe(newNode)
 					nodeToShot[newNode] = i
 					RegenerateSortedKeyFrames(i)
-					
+
 					-- create frame nodes
 					for _, frame in pairs(shotSortedKeyFrames[i]) do
 						local subnode = newNode:Add(FrameToTime(frame))
 						subnode = UnlinkSafe(subnode)
 						nodeToKeyFrame[subnode] = frame
 					end
-					
+
 					if i==1 then
 						shotsTree:Select(newNode)
 					end
