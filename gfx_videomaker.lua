@@ -76,9 +76,10 @@ local shots = {} -- {shotNum = { frame = camState }}
 local shotSortedKeyFrames = {}
 local playedShot
 local playedFrame
-local recording
-local playing = false
+local recording = false
 local vsx, vsy
+
+local recordQueue = {}
 
 -----------------------
 -- /Util funcs
@@ -288,7 +289,7 @@ local function DeleteNode()
 end
 
 
-local function PlayShot()
+local function PlayShot(record)
 	local node = GetSelectedNode()
 	if not node then
 		return
@@ -301,18 +302,20 @@ local function PlayShot()
 	if not shot then
 		return
 	end
-	if #shotSortedKeyFrames[shot] < 2 then
+	local numKeyFrames = #shotSortedKeyFrames[shot]
+	if numKeyFrames < 2 then
 		Spring.Echo("A shot must have a start and an end")
 		return
 	end
-	playedShot = shot
-	playedFrame = shotSortedKeyFrames[shot][1]
-
-	Spring.SetCameraState(shots[playedShot][playedFrame])
-	Spring.SetVideoCapturingMode(true)
-	Spring.SendCommands("hideinterface 1")
-	vsx, vsy = widgetHandler:GetViewSizes()
-	playing = true
+	local offset = Spring.GetGameFrame() + 1
+	for kf = shotSortedKeyFrames[shot][1],shotSortedKeyFrames[shot][numKeyFrames] do
+		local frame = offset + kf - shotSortedKeyFrames[shot][1]
+		-- shouldn't happen, but for safety
+		if not recordQueue[frame] then
+			recordQueue[frame] = {}
+		end
+		table.insert(recordQueue[frame], {shot, kf, record})
+	end
 end
 
 
@@ -383,7 +386,7 @@ local function InitGUI()
 		caption = "Play Shot",
 		OnClick = {
 			function(self)
-				PlayShot()
+				PlayShot(false)
 			end
 		}
 	}
@@ -395,8 +398,7 @@ local function InitGUI()
 		caption = "Record Shot",
 		OnClick = {
 			function(self)
-				recording = true
-				PlayShot()
+				PlayShot(true)
 			end
 		}
 	}
@@ -657,16 +659,9 @@ end
 local gameFrame
 
 local function RecordFrame()
-	local f = Spring.GetGameFrame()
-	if f == gameFrame then
-		return false
-	end
-	gameFrame = f
-
 	if recording then
 		gl.SaveImage(0,0,vsx,vsy,string.format(CAPTURES_DIR .. "/capture_%06d_%06d.png", playedShot, playedFrame));
 	end
-
 	return true
 end
 
@@ -697,24 +692,49 @@ local function SetupCamera()
 end
 
 
+local function PopFromQueue()
+	local currentQueue = recordQueue[gameFrame]
+	if not currentQueue or #currentQueue == 0 then
+		return false
+	end
+	playedShot, playedFrame, recording = currentQueue[#currentQueue][1], currentQueue[#currentQueue][2], currentQueue[#currentQueue][3]
+	currentQueue[#currentQueue] = nil
+	return true
+end
+
+
+function widget:GameFrame()
+	gameFrame = Spring.GetGameFrame()
+	recordQueue[gameFrame - 1] = nil
+	if not recordQueue[gameFrame] then
+		return
+	end
+	Spring.SendCommands("pause 1")
+	PopFromQueue()
+	--Spring.Echo(playedShot, playedFrame)
+	SetupCamera()
+	Spring.SetVideoCapturingMode(true)
+	Spring.SendCommands("hideinterface 1")
+	vsx, vsy = widgetHandler:GetViewSizes()
+end
+
+
 function widget:DrawScreenEffects()
-	if not playing then
+	if not playedShot or not playedFrame then
 		return
 	end
 
 	if RecordFrame() then
-		local sortedKeyFrames = shotSortedKeyFrames[playedShot]
-		if playedFrame ~= sortedKeyFrames[#sortedKeyFrames] then
-			playedFrame = playedFrame + 1
+		if PopFromQueue() then
 			SetupCamera()
 			ChangeTimelineFrame(playedFrame)
 		else
 			Spring.SetVideoCapturingMode(false)
 			Spring.SendCommands("hideinterface 0")
-			recording = false
-			playing = false
+			Spring.SendCommands("pause 0")
 			playedFrame = nil
 			playedShot = nil
+			recording = false
 		end
 	end
 end
