@@ -292,14 +292,14 @@ local function DeleteNode()
 end
 
 
-local function QueueShot(shotNum, offset, record)
+local function QueueShot(shotNum, absolute, record)
 	local numKeyFrames = #shotSortedKeyFrames[shotNum]
 	if numKeyFrames < 2 then
 		Spring.Echo("A shot must have a start and an end")
 		return
 	end
 	for kf = shotSortedKeyFrames[shotNum][1],shotSortedKeyFrames[shotNum][numKeyFrames] do
-		local frame = offset + kf - shotSortedKeyFrames[shotNum][1]
+		local frame = absolute and kf or (Spring.GetGameFrame() + 1 + kf - shotSortedKeyFrames[shotNum][1])
 		-- shouldn't happen, but for safety
 		if not recordQueue[frame] then
 			recordQueue[frame] = {}
@@ -308,7 +308,7 @@ local function QueueShot(shotNum, offset, record)
 	end
 end
 
-local function QueueCurrentShot(offset, record)
+local function QueueCurrentShot(absolute, record)
 	local node = GetSelectedNode()
 	if not node then
 		return
@@ -321,12 +321,12 @@ local function QueueCurrentShot(offset, record)
 	if not shotNum then
 		return
 	end
-	QueueShot(shotNum, offset, record)
+	QueueShot(shotNum, absolute, record)
 end
 
-local function QueueAllShots(offset, record)
+local function QueueAllShots(absolute, record)
 	for i, _ in pairs(shots) do
-		QueueShot(i, offset, record)
+		QueueShot(i, absolute, record)
 	end
 end
 
@@ -448,7 +448,7 @@ local function InitGUI()
 		caption = "Play Shot",
 		OnClick = {
 			function(self)
-				QueueCurrentShot(Spring.GetGameFrame() + 1, false)
+				QueueCurrentShot(false, false)
 			end
 		}
 	}
@@ -460,7 +460,7 @@ local function InitGUI()
 		caption = "Record Shot",
 		OnClick = {
 			function(self)
-				QueueCurrentShot(Spring.GetGameFrame() + 1, true)
+				QueueCurrentShot(false, true)
 			end
 		}
 	}
@@ -477,7 +477,7 @@ local function InitGUI()
 					Spring.Echo("Not playing a replay!")
 					return
 				end
-				QueueAllShots(0, false)
+				QueueAllShots(true, false)
 			end
 		}
 	}
@@ -493,7 +493,7 @@ local function InitGUI()
 					Spring.Echo("Not playing a replay!")
 					return
 				end
-				QueueAllShots(0, true)
+				QueueAllShots(true, true)
 			end
 		}
 	}
@@ -724,6 +724,7 @@ end
 --------------
 
 local gameFrame
+local paused = false
 
 local function RecordFrame()
 	if recording then
@@ -779,7 +780,11 @@ function widget:GameFrame()
 	if not recordQueue[gameFrame] then
 		return
 	end
-	Spring.SendCommands("pause 1")
+
+	if not paused then
+		Spring.SendCommands("pause")
+		paused = true
+	end
 	PopFromQueue()
 	--Spring.Echo(playedShot, playedFrame)
 	SetupCamera()
@@ -801,12 +806,19 @@ function widget:DrawScreenEffects()
 				ChangeTimelineFrame(playedFrame)
 			end
 		else
-			Spring.SetVideoCapturingMode(false)
-			Spring.SendCommands("hideinterface 0")
-			Spring.SendCommands("pause 0")
 			playedFrame = nil
 			playedShot = nil
 			recording = false
+			if recordQueue[gameFrame + 1] then
+				Spring.SendCommands("singlestep")
+			else
+				Spring.SendCommands("hideinterface 0")
+				if paused then
+					Spring.SendCommands("pause")
+					paused = false
+				end
+				Spring.SetVideoCapturingMode(false)
+			end
 		end
 	end
 end
