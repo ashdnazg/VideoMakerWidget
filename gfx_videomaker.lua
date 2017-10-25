@@ -73,6 +73,7 @@ local shots = {} -- {shotNum = { frame = camState }}
 local shotSortedKeyFrames = {}
 local playedShot
 local playedFrame
+local record
 
 -----------------------
 -- /Util funcs
@@ -126,13 +127,18 @@ local function GetInterpolatedCameraState(ratio, state1, state2)
 	interpState.pz  = state1.pz  * ratio2 + state2.pz  * ratio
 	interpState.fov = state1.fov * ratio2 + state2.fov * ratio
 
-	interpState.dx  = InterpRotation(ratio2, ratio, state1.dx, state2.dx)
-	interpState.dy  = InterpRotation(ratio2, ratio, state1.dy, state2.dy)
-	interpState.dz  = InterpRotation(ratio2, ratio, state1.dz, state2.dz)
+	local rxz1 = math.atan2(state1.dx, state1.dz)
+	local rxz2 = math.atan2(state2.dx, state2.dz)
+	local ry1 = math.acos(state1.dy)
+	local ry2 = math.acos(state2.dy)
 
-	interpState.dx  = InterpRotation(ratio2, ratio, state1.dx, state2.dx)
-	interpState.dy  = InterpRotation(ratio2, ratio, state1.dy, state2.dy)
-	interpState.dz  = InterpRotation(ratio2, ratio, state1.dz, state2.dz)
+	local ry = InterpRotation(ratio2, ratio, ry1, ry2)
+	local rxz = InterpRotation(ratio2, ratio, rxz1, rxz2)
+
+	interpState.dy = math.cos(ry)
+
+	interpState.dx = math.sin(rxz) * math.sin(ry)
+	interpState.dz = math.cos(rxz) * math.sin(ry)
 
 	return interpState
 end
@@ -394,7 +400,7 @@ local function InitGUI()
 		caption = "Save Shots",
 		OnClick = {
 			function(self)
-				WG.SaveTable(shots, "cache/", GetFilename(), "", {endOfFile = true, prefixReturn = true})
+				table.save(shots, "cache/" .. GetFilename())
 			end
 		}
 	}
@@ -407,14 +413,13 @@ local function InitGUI()
 		OnClick = {
 			function(self)
 				shots = VFS.Include("cache/" .. GetFilename())
-				numShots = #shots
 				nodeToShot = {}
 				shotSortedKeyFrames = {}
 				nodeToKeyFrame = {}
 				shotsTree.root:ClearChildren()
 
 				-- create shot nodes
-				for i=1,#shots do
+				for i, _ in pairs(shots) do
 					local newNode = shotsTree.root:Add("Shot " .. i)
 					newNode = UnlinkSafe(newNode)
 					nodeToShot[newNode] = i
@@ -683,10 +688,8 @@ function widget:GameFrame(n)
 end
 
 function widget:Update()
-	if nextCamState then
-		Spring.SetCameraState(nextCamState)
-		nextCamState = nil
-	end
+
+
 end
 
 function widget:Initialize()
