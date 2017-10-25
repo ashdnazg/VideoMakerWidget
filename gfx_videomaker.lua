@@ -5,7 +5,7 @@ function widget:GetInfo()
 		author    = "ashdnazg",
 		date      = "18 Nov 2016",
 		license   = "GNU GPL, v2 or later",
-		layer     = 5,
+		layer     = 99999999,
 		enabled   = true,
 	}
 end
@@ -50,6 +50,8 @@ local timelineLabel
 -------------- /CHILI ---------------
 -------------------------------------
 
+local CAPTURES_DIR = "captures"
+local SAVED_SHOTS_DIR = "cache"
 
 -----------------------
 -- Timeline Vars
@@ -74,7 +76,9 @@ local shots = {} -- {shotNum = { frame = camState }}
 local shotSortedKeyFrames = {}
 local playedShot
 local playedFrame
-local record
+local recording
+local playing = false
+local vsx, vsy
 
 -----------------------
 -- /Util funcs
@@ -303,6 +307,12 @@ local function PlayShot()
 	end
 	playedShot = shot
 	playedFrame = shotSortedKeyFrames[shot][1]
+
+	Spring.SetCameraState(shots[playedShot][playedFrame])
+	Spring.SetVideoCapturingMode(true)
+	Spring.SendCommands("hideinterface 1")
+	vsx, vsy = widgetHandler:GetViewSizes()
+	playing = true
 end
 
 
@@ -385,7 +395,7 @@ local function InitGUI()
 		caption = "Record Shot",
 		OnClick = {
 			function(self)
-				record = true
+				recording = true
 				PlayShot()
 			end
 		}
@@ -403,7 +413,7 @@ local function InitGUI()
 					shots = shots,
 					shotSortedKeyFrames = shotSortedKeyFrames
 				}
-				table.save(t, "cache/" .. GetFilename())
+				table.save(t, SAVED_SHOTS_DIR .. "/" .. GetFilename())
 			end
 		}
 	}
@@ -415,7 +425,7 @@ local function InitGUI()
 		caption = "Load Shots",
 		OnClick = {
 			function(self)
-				local t = VFS.Include("cache/" .. GetFilename())
+				local t = VFS.Include(SAVED_SHOTS_DIR .. "/" .. GetFilename())
 				shots = t.shots
 				shotSortedKeyFrames = t.shotSortedKeyFrames
 				numShots = t.numShots
@@ -644,61 +654,73 @@ end
 --  CALLINS --
 --------------
 
-local saveImage
-local vsx, vsy
+local gameFrame
 
-function widget:GameFrame(n)
-	if saveImage then
-		if record then
-			gl.SaveImage(0,0,vsx,vsy,string.format("captures/capture_%06d.png", saveImage));
-		end
-		saveImage = false
-		if not playedShot or not playedFrame then
-			Spring.SetVideoCapturingMode(false)
-			Spring.SendCommands("hideinterface 0")
-			record = false
-		end
+local function RecordFrame()
+	local f = Spring.GetGameFrame()
+	if f == gameFrame then
+		return false
 	end
-	if not playedShot or not playedFrame then
-		playedShot = nil
-		playedFrame = nil
+	gameFrame = f
+
+	if recording then
+		gl.SaveImage(0,0,vsx,vsy,string.format(CAPTURES_DIR .. "/capture_%06d_%06d.png", playedShot, playedFrame));
+	end
+
+	return true
+end
+
+
+local function SetupCamera()
+	local keyFrames = shots[playedShot]
+	local sortedKeyFrames = shotSortedKeyFrames[playedShot]
+	local prevKeyFrame
+	local nextKeyFrame
+	for _, keyFrame in pairs(sortedKeyFrames) do
+		nextKeyFrame = keyFrame
+
+		if playedFrame < keyFrame then
+			break
+		end
+
+		prevKeyFrame = keyFrame
+	end
+
+
+	-- will also happen on last keyframe
+	if playedFrame == prevKeyFrame then
+		Spring.SetCameraState(keyFrames[playedFrame])
+	else
+		local ratio = (playedFrame - prevKeyFrame) / (nextKeyFrame - prevKeyFrame)
+		Spring.SetCameraState(GetInterpolatedCameraState(ratio, keyFrames[prevKeyFrame], keyFrames[nextKeyFrame]))
+	end
+end
+
+
+function widget:DrawScreenEffects()
+	if not playing then
 		return
 	end
 
-	local keyFrames = shots[playedShot]
-	local sortedKeyFrames = shotSortedKeyFrames[playedShot]
-	if playedFrame == sortedKeyFrames[1] then
-		Spring.SetVideoCapturingMode(true)
-		Spring.SendCommands("hideinterface 1")
-		vsx, vsy = widgetHandler:GetViewSizes()
-	end
-
-	saveImage = playedFrame
-	for i, keyFrame in pairs(sortedKeyFrames) do
-		if keyFrame == playedFrame then
-			Spring.SetCameraState(keyFrames[keyFrame])
-		elseif playedFrame < keyFrame then
-			local prevKeyFrame = sortedKeyFrames[i - 1]
-			local ratio = (playedFrame - prevKeyFrame) / (keyFrame - prevKeyFrame)
-			Spring.SetCameraState(GetInterpolatedCameraState(ratio, keyFrames[prevKeyFrame], keyFrames[keyFrame]))
-			break
+	if RecordFrame() then
+		local sortedKeyFrames = shotSortedKeyFrames[playedShot]
+		if playedFrame ~= sortedKeyFrames[#sortedKeyFrames] then
+			playedFrame = playedFrame + 1
+			SetupCamera()
+			ChangeTimelineFrame(playedFrame)
+		else
+			Spring.SetVideoCapturingMode(false)
+			Spring.SendCommands("hideinterface 0")
+			recording = false
+			playing = false
+			playedFrame = nil
+			playedShot = nil
 		end
 	end
-	ChangeTimelineFrame(playedFrame)
-	if playedFrame ~= sortedKeyFrames[#sortedKeyFrames] then
-		playedFrame = playedFrame + 1
-	else
-		playedFrame = nil
-		playedShot = nil
-	end
-end
-
-function widget:Update()
-
-
 end
 
 function widget:Initialize()
+	Spring.CreateDir(CAPTURES_DIR)
 	InitGUI()
 	ChangeTimelineFrame(0)
 end
