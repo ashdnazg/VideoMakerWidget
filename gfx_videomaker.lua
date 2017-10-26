@@ -83,6 +83,7 @@ local vsx, vsy
 
 local recordQueue = {}
 local isReplay = Spring.IsReplay()
+local shotsPerFrame = Spring.SetVideoCapturingTimeOffset and 2 or 1
 
 -----------------------
 -- /Util funcs
@@ -304,7 +305,13 @@ local function QueueShot(shotNum, absolute, record)
 		if not recordQueue[frame] then
 			recordQueue[frame] = {}
 		end
-		table.insert(recordQueue[frame], {shotNum, kf, record})
+		if kf == shotSortedKeyFrames[shotNum][numKeyFrames] then
+			table.insert(recordQueue[frame], {shotNum, kf, record})
+		else
+			for j = shotsPerFrame - 1,0,-1  do
+				table.insert(recordQueue[frame], {shotNum, kf + (j / shotsPerFrame), record})
+			end
+		end
 	end
 end
 
@@ -728,7 +735,8 @@ local paused = false
 
 local function RecordFrame()
 	if recording then
-		gl.SaveImage(0,0,vsx,vsy,string.format(CAPTURES_DIR .. "/capture_%06d_%06d.png", playedShot, playedFrame));
+		local frameOffset = (playedFrame - shotSortedKeyFrames[playedShot][1]) * shotsPerFrame
+		gl.SaveImage(0,0,vsx,vsy,string.format(CAPTURES_DIR .. "/capture_%06d_%06d.png", playedShot, frameOffset));
 	end
 	return true
 end
@@ -766,6 +774,10 @@ local function PopFromQueue()
 		return false
 	end
 	playedShot, playedFrame, recording = currentQueue[#currentQueue][1], currentQueue[#currentQueue][2], currentQueue[#currentQueue][3]
+	if shotsPerFrame > 1 then
+		local _, frac = math.modf(playedFrame)
+		Spring.SetVideoCapturingTimeOffset(frac)
+	end
 	currentQueue[#currentQueue] = nil
 	return true
 end
@@ -810,6 +822,7 @@ function widget:DrawScreenEffects()
 			playedShot = nil
 			recording = false
 			if recordQueue[gameFrame + 1] then
+				Spring.SetVideoCapturingMode(false)
 				Spring.SendCommands("singlestep")
 			else
 				Spring.SendCommands("hideinterface 0")
@@ -818,6 +831,9 @@ function widget:DrawScreenEffects()
 					paused = false
 				end
 				Spring.SetVideoCapturingMode(false)
+				if shotsPerFrame > 1 then
+					Spring.SetVideoCapturingTimeOffset(0)
+				end
 			end
 		end
 	end
